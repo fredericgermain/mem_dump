@@ -1,0 +1,17 @@
+{ 
+  "id": "A20_AC",
+  "doc": "A20 User Manual(Revision 1.4)",
+  "regs": [ { 
+    "id": "AC_DAC_DPC",
+    "offset": 0,
+    "description": "DAC Digital Part Control Register",
+    "fields": [ {
+      "id": "EN_DA",
+      "bit": 31,
+      "len": 1,
+      "access": "rw",
+      "default": 0,
+      "description": "DAC Digital Part Enable\n 0: Disable \n 1: Enable"
+    } ]
+  } ]
+}
