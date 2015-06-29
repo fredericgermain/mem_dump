@@ -37,29 +37,72 @@ class BitWriter:
  
  
 class BitReader:
-    def __init__(self, f):
-        self.input = f
+    def __init__(self):
         self.accumulator = 0
         self.bcount = 0
-        self.read = 0
- 
+
     def readbit(self):
         if self.bcount == 0 :
-            a = self.input.read(1)
-            if ( len(a) > 0 ):
-                self.accumulator = ord(a)
-            self.bcount = 8
-            self.read = len(a)
+            self.read(1)
         rv = ( self.accumulator & ( 1 << (self.bcount-1) ) ) >> (self.bcount-1)
         self.bcount -= 1
         return rv
- 
+
     def readbits(self, n):
         v = 0
         while n > 0:
             v = (v << 1) | self.readbit()
             n -= 1
         return v
+ 
+
+class MmapBitReader(BitReader):
+    def __init__(self, fname, addr):
+        BitReader.__init__(self)
+
+        self.f = open(fname, "rw+b")
+
+        page_addr = addr / MAP_SIZE
+        off_addr = addr % MAP_SIZE
+
+        print "page: %d, offset %d" % (page_addr, off_addr)
+        self.mm = mmap.mmap(f.fileno(), MAP_SIZE, mmap.MAP_SHARED, access=mmap.ACCESS_WRITE, offset=page_addr * MAP_SIZE)
+        self.mm.seek(off_addr)
+    
+    def close(self):
+        self.f.close()
+        del(self.f)
+        self.mm.close()
+        del(self.mm)
+
+    def read(self, len): 
+        a = self.input.read(1)
+        if ( len(a) > 0 ):
+            self.accumulator = ord(a)
+        self.bcount = 8
+    
+class I2cBitReader(BitReader):
+    def __init__(self, busno, dev_addr):
+        BitReader.__init__(self)
+
+        try:
+            import smbus
+        except: 
+            print "need to install smbus-cffi"
+
+        try:
+            bus = smbus.SMBus(busno)
+        except IOError, e:
+            print "probably no right on i2c (root?)"
+            raise e
+        self.bus = bus
+        self.dev_addr = dev_addr
+        self.offset = 0
+
+    def read(self, len): 
+        self.accumulator = self.bus.read_byte_data(self.dev_addr, self.offset)
+        self.offset += 1
+        self.bcount = 8
  
 parser = argparse.ArgumentParser(description='This is a demo script by nixCraft.')
 parser.add_argument('addr', help='address to use')
@@ -84,26 +127,18 @@ def chunks(l):
 
 read_format = list(chunks(args.read))
 
-with open("/dev/mem", "rw+b") as f:
-    exit
-    page_addr = addr / MAP_SIZE
-    off_addr = addr % MAP_SIZE
-
-    print "page: %d, offset %d" % (page_addr, off_addr)
-    mm = mmap.mmap(f.fileno(), MAP_SIZE, mmap.MAP_SHARED, access=mmap.ACCESS_WRITE, offset=page_addr * MAP_SIZE)
-    mm.seek(off_addr)
-
-    bitstream = BitReader(mm)
+def dump(bitstream, read_format, reg_size):
     offset = 0
  
     for fmt in read_format:
         if fmt[0] == 0:
             continue
-        if offset % 32 == 0:
+        if offset % reg_size == 0:
 		print 'REG #0x%x' % (offset/8)
         if fmt[1] == 'b':
             l = bitstream.readbits(fmt[0])
-            fmted = "{0:b}".format(l)
+            ffmt = "{0:0=%db}" % (fmt[0])
+            fmted = ffmt.format(l) 
         elif fmt[1] == 'o':
             l = bitstream.readbits(fmt[0])
             nb_letter = (fmt[0]+2)/3 
@@ -120,7 +155,7 @@ with open("/dev/mem", "rw+b") as f:
         else:
             fmted = None
             print "unhandled format ", fmt 
-        offseted = 31 - (offset % 32) - fmt[0] + 1
+        offseted = reg_size - (offset % reg_size) - fmt[0]
         if fmted is not None:
             print "%02d %s" % (offseted, fmted)
         else:
@@ -128,4 +163,12 @@ with open("/dev/mem", "rw+b") as f:
         offset += fmt[0]
          
 
-    mm.close()
+if addr > 0:
+    bts = BitReader.open_mmap("/dev/mem", addr)
+    dump(bts, read_format, 32)
+else:
+    import sys
+    bts = I2cBitReader(2, 0x58)
+    dump(bts, read_format, 8)
+bts.close()
+
